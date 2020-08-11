@@ -4,7 +4,7 @@ A small CLI to add a bunch of translations to Lokalise at once.
 
 ## Usage
 
-Install (or update) with `carog install --git https://github.com/undo-insurance/lokalise-bulk-add-keys.git`.
+Install (or update) with `cargo install --git https://github.com/undo-insurance/lokalise-bulk-add-keys.git`.
 
 Set an environment variable called `LOKALISE_API_TOKEN` with a read+write API token. You can make one [here](https://app.lokalise.com/profile#apitokens).
 
