@@ -6,7 +6,7 @@ use reqwest::{
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::json;
-use std::{env, path::PathBuf};
+use std::{collections::HashSet, env, path::PathBuf};
 use structopt::StructOpt;
 use tokio::fs;
 
@@ -49,6 +49,13 @@ async fn try_main() -> Result<()> {
         .find(|p| p.name == opt.project)
         .ok_or_else(|| Error::msg(format!("No project name '{}' was found", opt.project)))?;
 
+    let all_keys = client.all_keys(&project).await?;
+    for key in &keys_to_add {
+        if all_keys.contains(&key.key) {
+            return Err(Error::msg(format!("The key `{}` already exists", key.key)));
+        }
+    }
+
     client.create_keys(&project, keys_to_add).await?;
 
     Ok(())
@@ -56,11 +63,11 @@ async fn try_main() -> Result<()> {
 
 #[derive(Debug, Deserialize, Serialize)]
 struct Data {
-    keys: Vec<Key>,
+    keys: Vec<KeyToAdd>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct Key {
+struct KeyToAdd {
     key: String,
     #[serde(flatten)]
     translation: Translation,
@@ -99,7 +106,62 @@ impl LokaliseClient {
         Ok(res.json::<ProjectsResponse>().await?.projects)
     }
 
-    async fn create_keys(&self, project: &Project, keys: Vec<Key>) -> Result<()> {
+    async fn all_keys(&self, project: &Project) -> Result<HashSet<String>> {
+        #[derive(Debug, Deserialize)]
+        struct KeysResponse {
+            keys: Vec<KeyResponse>,
+        }
+
+        #[derive(Debug, Deserialize)]
+        struct KeyResponse {
+            key_name: KeyName,
+        }
+
+        #[derive(Debug, Deserialize)]
+        struct KeyName {
+            ios: String,
+            android: String,
+            web: String,
+            other: String,
+        }
+
+        let mut key_names = HashSet::new();
+        let limit = 1000;
+        let mut page = 1;
+
+        loop {
+            let res = self
+                .client
+                .get(&self.url(&format!("/projects/{}/keys", &project.id)))
+                .query(&[("limit", limit), ("page", page)])
+                .send()
+                .await?;
+            let keys = res.json::<KeysResponse>().await?.keys;
+
+            let keys_count = keys.len();
+
+            for key in keys {
+                let key = key.key_name;
+                if key.ios == key.android && key.android == key.web && key.web == key.other {
+                    key_names.insert(key.ios.clone());
+                } else {
+                    return Err(Error::msg(
+                        "Key with different names per platform isn't supported",
+                    ));
+                }
+            }
+
+            if keys_count < limit {
+                break;
+            }
+
+            page += 1;
+        }
+
+        Ok(key_names)
+    }
+
+    async fn create_keys(&self, project: &Project, keys: Vec<KeyToAdd>) -> Result<()> {
         let payload = json!({
             "keys": keys.iter().map(|key| {
                 let translation = match &key.translation {
