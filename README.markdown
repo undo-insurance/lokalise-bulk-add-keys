@@ -14,6 +14,9 @@ Write a YAML file containing the keys you want to add:
 keys:
     - key: greeting
       translation: Hello [%s:name]!
+      tags: # defaults to no tags
+          - tag_one
+          - tag_two
 
     - key: singlular_and_plural
       translations: # the plural 's'

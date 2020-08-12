@@ -71,6 +71,8 @@ struct KeyToAdd {
     key: String,
     #[serde(flatten)]
     translation: Translation,
+    #[serde(default)]
+    tags: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -188,6 +190,7 @@ impl LokaliseClient {
                     "translations": [translation],
                     "is_plural": is_plural,
                     "platforms": ["ios", "android", "web", "other"],
+                    "tags": &key.tags,
                 })
             }).collect::<Vec<_>>()
         });

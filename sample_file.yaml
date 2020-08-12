@@ -1,6 +1,9 @@
 keys:
     - key: greeting
       translation: Hello [%s:name]!
+      tags:
+          - one
+          - two
 
     - key: singlular_and_plural
       translations: # the plural 's'
