@@ -16,6 +16,10 @@ struct Opt {
     #[structopt(short = "p", long = "project")]
     project: String,
 
+    /// Don't upload things to Lokalise, just parse the input file
+    #[structopt(long = "dry-run")]
+    dry_run: bool,
+
     /// Input file containing the keys you want to add
     #[structopt(name = "FILE", parse(from_os_str))]
     input: PathBuf,
@@ -37,6 +41,11 @@ async fn try_main() -> Result<()> {
 
     let file_contents = fs::read_to_string(&opt.input).await?;
     let keys_to_add = serde_yaml::from_str::<Data>(&file_contents)?.keys;
+
+    if opt.dry_run {
+        println!("{:#?}", keys_to_add);
+        return Ok(());
+    }
 
     let lokalise_token = env::var("LOKALISE_API_TOKEN")
         .map_err(|_| Error::msg("Missing env var LOKALISE_API_TOKEN"))?;
