@@ -118,24 +118,6 @@ impl LokaliseClient {
     }
 
     async fn all_keys(&self, project: &Project) -> Result<HashSet<String>> {
-        #[derive(Debug, Deserialize)]
-        struct KeysResponse {
-            keys: Vec<KeyResponse>,
-        }
-
-        #[derive(Debug, Deserialize)]
-        struct KeyResponse {
-            key_name: KeyName,
-        }
-
-        #[derive(Debug, Deserialize)]
-        struct KeyName {
-            ios: String,
-            android: String,
-            web: String,
-            other: String,
-        }
-
         let mut key_names = HashSet::new();
         let limit = 1000;
         let mut page = 1;
@@ -172,9 +154,9 @@ impl LokaliseClient {
         Ok(key_names)
     }
 
-    async fn create_keys(&self, project: &Project, keys: Vec<KeyToAdd>) -> Result<()> {
+    async fn create_keys(&self, project: &Project, keys_to_create: Vec<KeyToAdd>) -> Result<()> {
         let payload = json!({
-            "keys": keys.iter().map(|key| {
+            "keys": keys_to_create.iter().map(|key| {
                 let translation = match &key.translation {
                     Translation::Singular(text) => json!({
                         "language_iso": &project.base_language_iso,
@@ -204,13 +186,72 @@ impl LokaliseClient {
             }).collect::<Vec<_>>()
         });
 
-        self.client
+        let resp = self
+            .client
             .post(&self.url(&format!("/projects/{}/keys", &project.id)))
             .json(&payload)
             .send()
+            .await?
+            .json::<serde_json::Value>()
             .await?;
 
-        Ok(())
+        let resp_as_keys = serde_json::from_value::<KeysResponse>(resp.clone());
+        let resp_as_error = serde_json::from_value::<ErrorResponse>(resp.clone());
+        let keys = match (resp_as_keys, resp_as_error) {
+            (Ok(keys_resp), Err(_)) => keys_resp.keys,
+            (Err(_), Ok(ErrorResponse { error })) => {
+                use std::fmt::Write;
+
+                let mut msg = String::new();
+                writeln!(msg, "Lokalise request failed").unwrap();
+
+                if error.message == "Unauthorized" {
+                    write!(msg, "Got 401 unauthorized. Please ensure your auth token is correct and has both read and write permissions").unwrap();
+                } else {
+                    write!(msg, "Got {} {}", error.code, error.message).unwrap();
+                }
+
+                return Err(Error::msg(msg));
+            }
+            (Ok(_), Ok(_)) => {
+                return Err(Error::msg("Lokalise request both failed and succeeded...?"))
+            }
+            (Err(_), Err(_)) => return Err(Error::msg("Failed to parse lokalise response")),
+        };
+
+        let created_keys = keys
+            .into_iter()
+            .map(|key| key.key_name.ios)
+            .collect::<HashSet<_>>();
+
+        let mut keys_created = vec![];
+        let mut keys_not_created = vec![];
+        for key in &keys_to_create {
+            if created_keys.contains(&key.key) {
+                keys_created.push(&key.key);
+            } else {
+                keys_not_created.push(&key.key);
+            }
+        }
+
+        if keys_created.is_empty() && keys_not_created.is_empty() {
+            println!("No keys to create to seems 👀");
+            Ok(())
+        } else {
+            for key in keys_created {
+                println!("✅ {}", key)
+            }
+
+            if !keys_not_created.is_empty() {
+                for key in keys_not_created {
+                    println!("❌ {}", key)
+                }
+
+                Err(Error::msg("Failed to create some keys"))
+            } else {
+                Ok(())
+            }
+        }
     }
 
     fn url(&self, url: &str) -> String {
@@ -224,4 +265,33 @@ struct Project {
     id: String,
     name: String,
     base_language_iso: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct KeysResponse {
+    keys: Vec<KeyResponse>,
+}
+
+#[derive(Debug, Deserialize)]
+struct KeyResponse {
+    key_name: KeyName,
+}
+
+#[derive(Debug, Deserialize)]
+struct KeyName {
+    ios: String,
+    android: String,
+    web: String,
+    other: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ErrorResponse {
+    error: ErrorResponseInner,
+}
+
+#[derive(Debug, Deserialize)]
+struct ErrorResponseInner {
+    code: u32,
+    message: String,
 }
